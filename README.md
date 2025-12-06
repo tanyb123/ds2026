@@ -9,6 +9,6 @@ Students are expected to:
 Student Info
 =========================
 
-* Student Name: USTH ICT1
-* Student ID: Not-Vietnamese
-* Student Group ID: Not-for-now
+* Student Name: Nguyễn Duy Tân
+* Student ID: 22BA13278
+* Student Group ID: Group 14
