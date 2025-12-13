@@ -8,7 +8,7 @@
 
 ---
 
-## 📋 Tổng quan dự án
+## Tổng quan dự án
 
 Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép nhiều clients kết nối đồng thời đến một RPC server để thực thi các lệnh shell từ xa. Hệ thống mô phỏng chức năng tương tự `kubectl exec` trên Kubernetes, hỗ trợ quản lý session độc lập cho mỗi client với môi trường làm việc và biến môi trường riêng biệt.
 
@@ -20,9 +20,9 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 
 ---
 
-## 🏗️ Kiến trúc hệ thống (Architecture)
+## Kiến trúc hệ thống
 
-### High-Level Architecture
+### Kiến trúc tổng quan
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -45,7 +45,7 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
    └─────────┘      └─────────────┘    └───────────┘
 ```
 
-### Component Architecture
+### Kiến trúc thành phần
 
 #### 1. **RPC Server** (`server/main.go`)
 - **Chức năng**: Xử lý các RPC calls từ clients
@@ -161,13 +161,13 @@ sequenceDiagram
 
 ---
 
-## ✅ Tính chất của Distributed System được đảm bảo
+## Tính chất của Distributed System được đảm bảo
 
 ### 1. **Concurrency (Đồng thời)**
-- ✅ **Multiple Clients**: Server xử lý nhiều clients đồng thời sử dụng goroutines
-- ✅ **Thread Safety**: Sử dụng `sync.RWMutex` để bảo vệ shared state (sessions map)
-- ✅ **Non-blocking Operations**: Mỗi client connection chạy trong goroutine riêng biệt
-- ✅ **Concurrent Command Execution**: Nhiều lệnh có thể được thực thi đồng thời bởi các clients khác nhau
+- **Nhiều Clients**: Server xử lý nhiều clients đồng thời sử dụng goroutines
+- **An toàn luồng**: Sử dụng `sync.RWMutex` để bảo vệ shared state (sessions map)
+- **Thao tác không chặn**: Mỗi client connection chạy trong goroutine riêng biệt
+- **Thực thi lệnh đồng thời**: Nhiều lệnh có thể được thực thi đồng thời bởi các clients khác nhau
 
 **Implementation**:
 ```go
@@ -182,11 +182,11 @@ defer r.mu.Unlock()
 ```
 
 ### 2. **Fault Tolerance (Chịu lỗi)**
-- ✅ **Session Cleanup**: Tự động xóa sessions không hoạt động (30 phút timeout)
-- ✅ **Reconnection Logic**: Client tự động reconnect khi mất kết nối
-- ✅ **Heartbeat Mechanism**: Keepalive để phát hiện dead connections
-- ✅ **Command Timeout**: Timeout 5 phút cho mỗi lệnh để tránh hang
-- ✅ **Error Recovery**: Retry mechanism khi connection bị mất
+- **Dọn dẹp Session**: Tự động xóa sessions không hoạt động (30 phút timeout)
+- **Logic kết nối lại**: Client tự động reconnect khi mất kết nối
+- **Cơ chế Heartbeat**: Keepalive để phát hiện dead connections
+- **Timeout lệnh**: Timeout 5 phút cho mỗi lệnh để tránh hang
+- **Khôi phục lỗi**: Retry mechanism khi connection bị mất
 
 **Implementation**:
 ```go
@@ -202,35 +202,35 @@ defer cancel()
 ```
 
 ### 3. **Transparency (Trong suốt)**
-- ✅ **Access Transparency**: Clients truy cập remote shell như local shell
-- ✅ **Location Transparency**: Clients không cần biết vị trí vật lý của server
-- ✅ **Concurrency Transparency**: Nhiều clients hoạt động đồng thời mà không ảnh hưởng lẫn nhau
-- ✅ **Failure Transparency**: Hệ thống tự động xử lý lỗi và recovery
+- **Trong suốt truy cập**: Clients truy cập remote shell như local shell
+- **Trong suốt vị trí**: Clients không cần biết vị trí vật lý của server
+- **Trong suốt đồng thời**: Nhiều clients hoạt động đồng thời mà không ảnh hưởng lẫn nhau
+- **Trong suốt lỗi**: Hệ thống tự động xử lý lỗi và recovery
 
 ### 4. **Resource Sharing (Chia sẻ tài nguyên)**
-- ✅ **Shared Server**: Nhiều clients chia sẻ một RPC server
-- ✅ **Isolated Sessions**: Mỗi client có session riêng với:
+- **Server chia sẻ**: Nhiều clients chia sẻ một RPC server
+- **Sessions cô lập**: Mỗi client có session riêng với:
   - Working directory độc lập
   - Environment variables riêng
   - Command execution context riêng
 
 ### 5. **Scalability (Khả năng mở rộng)**
-- ✅ **Horizontal Scaling Ready**: Architecture hỗ trợ mở rộng (có thể thêm load balancer)
-- ✅ **Stateless RPC Calls**: Mỗi RPC call độc lập, dễ scale
-- ✅ **Efficient Resource Usage**: Goroutines nhẹ, có thể handle nhiều clients
+- **Sẵn sàng mở rộng ngang**: Architecture hỗ trợ mở rộng (có thể thêm load balancer)
+- **RPC Calls không trạng thái**: Mỗi RPC call độc lập, dễ scale
+- **Sử dụng tài nguyên hiệu quả**: Goroutines nhẹ, có thể handle nhiều clients
 
 ### 6. **Communication (Giao tiếp)**
-- ✅ **RPC Protocol**: Sử dụng Go's `net/rpc` cho remote procedure calls
-- ✅ **TCP/IP**: Giao thức TCP đáng tin cậy
-- ✅ **Structured Messages**: Request/Response với type safety
+- **Giao thức RPC**: Sử dụng Go's `net/rpc` cho remote procedure calls
+- **TCP/IP**: Giao thức TCP đáng tin cậy
+- **Tin nhắn có cấu trúc**: Request/Response với type safety
 
 ### 7. **Consistency (Nhất quán)**
-- ✅ **Session Consistency**: Mỗi client có session state nhất quán
-- ✅ **Mutex Protection**: Đảm bảo thread-safe access đến shared resources
+- **Nhất quán Session**: Mỗi client có session state nhất quán
+- **Bảo vệ Mutex**: Đảm bảo thread-safe access đến shared resources
 
 ---
 
-## 📁 Cấu trúc dự án và ý nghĩa các file
+## Cấu trúc dự án và ý nghĩa các file
 
 ### Server Components
 
@@ -242,7 +242,7 @@ defer cancel()
 - Background goroutine để cleanup inactive sessions
 - Heartbeat mechanism để track client activity
 
-**Key Features**:
+**Tính năng chính**:
 - `Execute()`: Thực thi shell command
 - `Register()`: Đăng ký client session
 - `SetEnv()`: Thiết lập environment variable
@@ -261,7 +261,7 @@ defer cancel()
 - Heartbeat goroutine để giữ session alive
 - Xử lý các lệnh đặc biệt (cd, setenv, exit, help)
 
-**Key Features**:
+**Tính năng chính**:
 - `NewRemoteShellClient()`: Tạo client connection
 - `Execute()`: Gửi command đến server với retry logic
 - `Reconnect()`: Tự động reconnect
@@ -276,7 +276,7 @@ defer cancel()
 - Hiển thị số lượng clients đang kết nối
 - Hữu ích cho monitoring và debugging
 
-### Build & Run Scripts
+### Scripts Build và Chạy
 
 #### `build.ps1` / `build.bat`
 **Ý nghĩa**: Scripts để build tất cả components (server, client, admin)
@@ -301,7 +301,7 @@ defer cancel()
 - Liệt kê tất cả IP addresses của máy
 - Hữu ích để tìm server IP cho remote connections
 
-### Configuration Files
+### File Cấu hình
 
 #### `go.mod`
 **Ý nghĩa**: Go module file định nghĩa dependencies
@@ -317,7 +317,7 @@ defer cancel()
 
 ---
 
-## 🚀 Hướng dẫn sử dụng
+## Hướng dẫn sử dụng
 
 ### Yêu cầu hệ thống
 - Go 1.21 hoặc cao hơn
@@ -371,81 +371,81 @@ Server sẽ chạy trên port `8080` và hiển thị IP addresses để clients
 
 ---
 
-## 📊 So sánh với kubectl exec
+## So sánh với kubectl exec
 
 | Tính năng | kubectl exec | Remote Shell RPC |
 |-----------|--------------|------------------|
-| Remote execution | ✅ | ✅ |
-| Multiple clients | ✅ (multiple pods) | ✅ |
-| Session management | ✅ (per pod) | ✅ (per client ID) |
-| Environment vars | ✅ | ✅ |
-| Working directory | ✅ | ✅ |
-| Streaming output | ✅ | ⚠️ (batch) |
-| Interactive TTY | ✅ | ⚠️ (basic) |
-| Authentication | ✅ | ❌ (chưa có) |
-| TLS/SSL | ✅ | ❌ (chưa có) |
+| Thực thi từ xa | Có | Có |
+| Nhiều clients | Có (multiple pods) | Có |
+| Quản lý session | Có (per pod) | Có (per client ID) |
+| Biến môi trường | Có | Có |
+| Thư mục làm việc | Có | Có |
+| Streaming output | Có | Hạn chế (batch) |
+| Interactive TTY | Có | Hạn chế (basic) |
+| Xác thực | Có | Chưa có |
+| TLS/SSL | Có | Chưa có |
 
 ---
 
-## 🔧 Các cải tiến đã thực hiện
+## Các cải tiến đã thực hiện
 
-### 1. **Session Management**
-- ✅ Tự động cleanup sessions không hoạt động (30 phút)
-- ✅ Tracking last active time
-- ✅ Isolated environment per session
+### 1. **Quản lý Session**
+- Tự động cleanup sessions không hoạt động (30 phút)
+- Theo dõi thời gian hoạt động cuối cùng
+- Môi trường cô lập cho mỗi session
 
-### 2. **Fault Tolerance**
-- ✅ Command execution timeout (5 phút)
-- ✅ Client reconnection logic
-- ✅ Heartbeat mechanism
-- ✅ Error handling và recovery
+### 2. **Chịu lỗi**
+- Timeout thực thi lệnh (5 phút)
+- Logic kết nối lại của client
+- Cơ chế Heartbeat
+- Xử lý lỗi và khôi phục
 
-### 3. **Concurrency**
-- ✅ Goroutine per connection
-- ✅ RWMutex cho thread-safe access
-- ✅ Non-blocking operations
+### 3. **Đồng thời**
+- Goroutine cho mỗi kết nối
+- RWMutex cho truy cập an toàn luồng
+- Thao tác không chặn
 
-### 4. **Error Handling**
-- ✅ Connection timeout
-- ✅ Retry mechanism
-- ✅ Graceful error messages
-
----
-
-## 🔮 Hướng phát triển tương lai
-
-- [ ] **Security**: Authentication và authorization
-- [ ] **Encryption**: TLS/SSL support
-- [ ] **Streaming**: Real-time output streaming
-- [ ] **Interactive TTY**: Full TTY support
-- [ ] **Load Balancing**: Multiple server instances
-- [ ] **Monitoring**: Metrics và logging nâng cao
-- [ ] **File Transfer**: SCP-like file transfer
-- [ ] **gRPC**: Migration từ net/rpc sang gRPC
-- [ ] **Docker Support**: Containerization
-- [ ] **Kubernetes Integration**: Native k8s support
+### 4. **Xử lý lỗi**
+- Timeout kết nối
+- Cơ chế thử lại
+- Thông báo lỗi rõ ràng
 
 ---
 
-## 📝 Kết luận
+## Hướng phát triển tương lai
+
+- [ ] **Bảo mật**: Xác thực và phân quyền
+- [ ] **Mã hóa**: Hỗ trợ TLS/SSL
+- [ ] **Streaming**: Streaming output thời gian thực
+- [ ] **Interactive TTY**: Hỗ trợ TTY đầy đủ
+- [ ] **Cân bằng tải**: Nhiều instance server
+- [ ] **Giám sát**: Metrics và logging nâng cao
+- [ ] **Truyền file**: Truyền file kiểu SCP
+- [ ] **gRPC**: Chuyển đổi từ net/rpc sang gRPC
+- [ ] **Hỗ trợ Docker**: Containerization
+- [ ] **Tích hợp Kubernetes**: Hỗ trợ k8s native
+
+---
+
+## Kết luận
 
 Dự án **Remote Shell RPC System** đã thành công trong việc:
-- ✅ Xây dựng hệ thống RPC server-client hoàn chỉnh
-- ✅ Hỗ trợ multiple clients đồng thời
-- ✅ Đảm bảo các tính chất cơ bản của Distributed System:
-  - Concurrency
-  - Fault Tolerance
-  - Transparency
-  - Resource Sharing
-  - Scalability
-  - Communication
-  - Consistency
+- Xây dựng hệ thống RPC server-client hoàn chỉnh
+- Hỗ trợ nhiều clients đồng thời
+- Đảm bảo các tính chất cơ bản của Distributed System:
+  - Concurrency (Đồng thời)
+  - Fault Tolerance (Chịu lỗi)
+  - Transparency (Trong suốt)
+  - Resource Sharing (Chia sẻ tài nguyên)
+  - Scalability (Khả năng mở rộng)
+  - Communication (Giao tiếp)
+  - Consistency (Nhất quán)
 
 Hệ thống có thể được sử dụng như một công cụ quản lý remote shell execution, tương tự kubectl exec, với khả năng mở rộng và cải tiến trong tương lai.
 
 ---
 
-## 📚 Tài liệu tham khảo
+## Tài liệu tham khảo
 
 - Go RPC Documentation: https://pkg.go.dev/net/rpc
 - Distributed Systems Concepts: Tanenbaum & Van Steen
@@ -453,6 +453,5 @@ Hệ thống có thể được sử dụng như một công cụ quản lý rem
 
 ---
 
-**Last Updated**: December 2025  
-**Version**: 1.0.0
+**Cập nhật lần cuối**: Tháng 12 năm 2025
 
