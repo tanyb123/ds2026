@@ -180,11 +180,11 @@ sequenceDiagram
 ```mermaid
 graph LR
     subgraph "Concurrency Control"
-        MUTEX[sync.RWMutex]
+        MUTEX[RWMutex Lock]
     end
     
     subgraph "Session Management"
-        MAP[map[string]*Session]
+        MAP[Session Map]
         REGISTER[Register]
         CLEANUP[Cleanup]
         HEARTBEAT[Heartbeat]
