@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package filetransfer;
+
+option go_package = "practical-work-02-rpc-file-transfer/proto";
+
+// FileTransferService provides RPC methods for file transfer
+service FileTransferService {
+  // SendFile sends a file to the server
+  rpc SendFile(stream FileChunk) returns (FileResponse);
+  
+  // ReceiveFile receives a file from the server (streaming)
+  rpc ReceiveFile(FileRequest) returns (stream FileChunk);
+  
+  // ListFiles lists all available files on the server
+  rpc ListFiles(Empty) returns (FileList);
+  
+  // DeleteFile deletes a file on the server
+  rpc DeleteFile(FileRequest) returns (FileResponse);
+}
+
+// FileRequest contains file request information
+message FileRequest {
+  string filename = 1;  // Name of the file
+  int64 offset = 2;     // Offset for resuming (optional)
+}
+
+// FileResponse contains the response to a file operation
+message FileResponse {
+  bool success = 1;           // Operation success
+  string message = 2;         // Response message
+  int64 file_size = 3;        // File size (if applicable)
+}
+
+// FileChunk represents a chunk of file data
+message FileChunk {
+  string filename = 1;        // Name of the file
+  bytes data = 2;             // Chunk data
+  int64 offset = 3;           // Offset in file
+  bool is_last = 4;           // Is this the last chunk?
+  int64 total_size = 5;       // Total file size
+}
+
+// FileInfo contains information about a file
+message FileInfo {
+  string filename = 1;        // File name
+  int64 size = 2;             // File size in bytes
+  int64 modified_time = 3;    // Last modified timestamp
+}
+
+// FileList contains a list of files
+message FileList {
+  repeated FileInfo files = 1;
+}
+
+// Empty message for requests without parameters
+message Empty {}
+
