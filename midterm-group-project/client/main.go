@@ -26,8 +26,10 @@ type CommandResponse struct {
 }
 
 type RemoteShellClient struct {
-	client *rpc.Client
-	id     string
+	client     *rpc.Client
+	id         string
+	serverAddr string
+	connected  bool
 }
 
 func NewRemoteShellClient(serverAddr string, clientID string) (*RemoteShellClient, error) {
@@ -37,9 +39,39 @@ func NewRemoteShellClient(serverAddr string, clientID string) (*RemoteShellClien
 	}
 
 	return &RemoteShellClient{
-		client: client,
-		id:     clientID,
+		client:     client,
+		id:         clientID,
+		serverAddr: serverAddr,
+		connected:  true,
 	}, nil
+}
+
+// Reconnect attempts to reconnect to the server
+func (c *RemoteShellClient) Reconnect() error {
+	if c.connected {
+		c.client.Close()
+	}
+	
+	client, err := rpc.Dial("tcp", c.serverAddr)
+	if err != nil {
+		c.connected = false
+		return fmt.Errorf("failed to reconnect: %v", err)
+	}
+	
+	c.client = client
+	c.connected = true
+	return nil
+}
+
+// SendHeartbeat sends a heartbeat to keep the session alive
+func (c *RemoteShellClient) SendHeartbeat() error {
+	var resp string
+	err := c.client.Call("RemoteShellService.Heartbeat", c.id, &resp)
+	if err != nil {
+		c.connected = false
+		return err
+	}
+	return nil
 }
 
 func (c *RemoteShellClient) Execute(command string) (*CommandResponse, error) {
@@ -51,7 +83,16 @@ func (c *RemoteShellClient) Execute(command string) (*CommandResponse, error) {
 
 	err := c.client.Call("RemoteShellService.Execute", req, &resp)
 	if err != nil {
-		return nil, err
+		// Try to reconnect once
+		if reconnectErr := c.Reconnect(); reconnectErr == nil {
+			// Retry the call
+			err = c.client.Call("RemoteShellService.Execute", req, &resp)
+			if err != nil {
+				return nil, fmt.Errorf("execution failed after reconnect: %v", err)
+			}
+		} else {
+			return nil, fmt.Errorf("execution failed: %v", err)
+		}
 	}
 
 	return &resp, nil
@@ -129,6 +170,20 @@ func main() {
 		fmt.Print(resp.Output)
 		return
 	}
+
+	// Start heartbeat goroutine to keep session alive
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute) // Send heartbeat every minute
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := shellClient.SendHeartbeat(); err != nil {
+					log.Printf("Heartbeat failed: %v", err)
+				}
+			}
+		}
+	}()
 
 	// Interactive mode
 	scanner := bufio.NewScanner(os.Stdin)
