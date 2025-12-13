@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -29,8 +30,10 @@ type CommandResponse struct {
 
 // RemoteShellService is the RPC service for remote shell execution
 type RemoteShellService struct {
-	mu       sync.Mutex
-	sessions map[string]*Session // Track active sessions by client ID
+	mu            sync.RWMutex
+	sessions      map[string]*Session // Track active sessions by client ID
+	sessionTimeout time.Duration      // Timeout for inactive sessions
+	stopCleanup   chan bool           // Channel to stop cleanup goroutine
 }
 
 // Session tracks a client session
@@ -44,9 +47,77 @@ type Session struct {
 
 // NewRemoteShellService creates a new remote shell service
 func NewRemoteShellService() *RemoteShellService {
-	return &RemoteShellService{
-		sessions: make(map[string]*Session),
+	service := &RemoteShellService{
+		sessions:       make(map[string]*Session),
+		sessionTimeout: 30 * time.Minute, // 30 minutes timeout
+		stopCleanup:    make(chan bool),
 	}
+	// Start background cleanup goroutine
+	go service.cleanupInactiveSessions()
+	return service
+}
+
+// cleanupInactiveSessions periodically removes inactive sessions
+func (r *RemoteShellService) cleanupInactiveSessions() {
+	ticker := time.NewTicker(5 * time.Minute) // Check every 5 minutes
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.mu.Lock()
+			now := time.Now()
+			for id, session := range r.sessions {
+				if now.Sub(session.LastActive) > r.sessionTimeout {
+					log.Printf("[Cleanup] Removing inactive session: %s (inactive for %v)", id, now.Sub(session.LastActive))
+					delete(r.sessions, id)
+				}
+			}
+			r.mu.Unlock()
+		case <-r.stopCleanup:
+			return
+		}
+	}
+}
+
+// Heartbeat updates the last active time for a client (for keepalive)
+func (r *RemoteShellService) Heartbeat(clientID string, resp *string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, exists := r.sessions[clientID]
+	if !exists {
+		*resp = "Error: client not registered"
+		return nil
+	}
+
+	session.LastActive = time.Now()
+	*resp = "OK"
+	return nil
+}
+
+// GetSessionInfo returns information about a client session
+func (r *RemoteShellService) GetSessionInfo(clientID string, resp *map[string]interface{}) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	session, exists := r.sessions[clientID]
+	if !exists {
+		*resp = map[string]interface{}{
+			"error": "Session not found",
+		}
+		return nil
+	}
+
+	*resp = map[string]interface{}{
+		"id":           session.ID,
+		"work_dir":     session.WorkDir,
+		"connected_at": session.ConnectedAt.Format(time.RFC3339),
+		"last_active":  session.LastActive.Format(time.RFC3339),
+		"env_count":    len(session.Env),
+		"is_active":    time.Since(session.LastActive) < r.sessionTimeout,
+	}
+	return nil
 }
 
 // Execute executes a shell command remotely
@@ -69,12 +140,15 @@ func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) 
 		log.Printf("[Client %s] Auto-registered on first command", req.ID)
 	}
 
-	// Prepare command
+	// Prepare command with timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", req.Command)
+		cmd = exec.CommandContext(ctx, "cmd", "/c", req.Command)
 	} else {
-		cmd = exec.Command("sh", "-c", req.Command)
+		cmd = exec.CommandContext(ctx, "sh", "-c", req.Command)
 	}
 
 	// Set working directory
@@ -90,6 +164,16 @@ func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) 
 
 	// Execute command
 	output, err := cmd.CombinedOutput()
+	
+	// Check for timeout
+	if ctx.Err() == context.DeadlineExceeded {
+		resp.ID = req.ID
+		resp.ExitCode = -1
+		resp.Error = "Command execution timeout (5 minutes)"
+		resp.Output = string(output)
+		log.Printf("[Client %s] Command timeout: %s", req.ID, req.Command)
+		return nil
+	}
 	
 	resp.ID = req.ID
 	if err != nil {
@@ -284,11 +368,20 @@ func main() {
 			continue
 		}
 
+		// Set connection timeout
+		conn.SetDeadline(time.Now().Add(10 * time.Minute))
+		
 		// Handle each client in a separate goroutine
 		go func(conn net.Conn) {
-			log.Printf("New client connected: %s", conn.RemoteAddr())
-			rpc.ServeConn(conn)
-			log.Printf("Client disconnected: %s", conn.RemoteAddr())
+			clientAddr := conn.RemoteAddr()
+			log.Printf("New client connected: %s", clientAddr)
+			defer conn.Close()
+			
+			// Serve RPC with error handling
+			if err := rpc.ServeConn(conn); err != nil {
+				log.Printf("RPC error for client %s: %v", clientAddr, err)
+			}
+			log.Printf("Client disconnected: %s", clientAddr)
 		}(conn)
 	}
 }
