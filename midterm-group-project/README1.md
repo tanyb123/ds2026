@@ -61,7 +61,9 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 
 #### 3. **Admin Tool** (`admin/main.go`)
 - Liệt kê clients đang active (có thể kèm token)
-- Có thể mở rộng: xem chi tiết session, kill session, reload config (future work)
+- Lệnh quản trị:
+  - `-sessions` : xem chi tiết session (id, workdir, env_count, last_active, idle)
+  - `-kill <id>`: kill session theo client ID
 
 ### Bảo mật & kiểm soát
 - Auth token cho mọi RPC (bật qua `--auth-token`)
@@ -319,38 +321,45 @@ defer r.mu.Unlock()
 make build
 ```
 
-### Chạy Server
+### Chạy Server (kèm bảo mật)
 
-**Windows**:
+Ví dụ bật token + whitelist + rate limit:
 ```powershell
-.\run-server.ps1
+.\bin\server.exe `
+  --auth-token mytoken `
+  --allow-commands "dir,echo" `
+  --rate-limit 60 `
+  --rate-window-sec 60
 ```
 
-**Linux/Mac**:
-```bash
-make run-server
-# hoặc
-./bin/server
-```
-
-Server sẽ chạy trên port `8080` và hiển thị IP addresses để clients kết nối.
-
-### Chạy Client
-
-**Windows**:
+Bật TLS (tùy chọn):
 ```powershell
-.\run-client.ps1 -ClientID my-client-1
+.\bin\server.exe `
+  --auth-token mytoken `
+  --tls-cert cert.pem `
+  --tls-key key.pem
 ```
 
-**Linux/Mac**:
-```bash
-./bin/client -id my-client-1
-```
+Port mặc định 8080 (đổi bằng `--port`).
 
-### Chạy Admin Tool
-
+### Chạy Client (có token)
 ```powershell
-.\bin\admin.exe
+.\bin\client.exe -server localhost:8080 -id my-client-1 -token mytoken
+```
+Ghi chú: Nếu server bật auth token, client phải truyền `-token` (cảnh báo khi bỏ trống, trừ khi `--allow-unsafe`).
+
+### Chạy Admin Tool (quản trị)
+- Liệt kê clients:
+```powershell
+.\bin\admin.exe -server localhost:8080 -token mytoken
+```
+- Liệt kê sessions chi tiết:
+```powershell
+.\bin\admin.exe -server localhost:8080 -token mytoken -sessions
+```
+- Kill session theo client ID:
+```powershell
+.\bin\admin.exe -server localhost:8080 -token mytoken -kill client-123
 ```
 
 ---
