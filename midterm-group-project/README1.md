@@ -61,6 +61,7 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 
 #### 3. **Admin Tool** (`admin/main.go`)
 - Liệt kê clients đang active (có thể kèm token)
+- Có thể mở rộng: xem chi tiết session, kill session, reload config (future work)
 
 ### Bảo mật & kiểm soát
 - Auth token cho mọi RPC (bật qua `--auth-token`)
@@ -365,8 +366,8 @@ Server sẽ chạy trên port `8080` và hiển thị IP addresses để clients
 | Thư mục làm việc | Có | Có |
 | Streaming output | Có | Hạn chế (batch) |
 | Interactive TTY | Có | Hạn chế (basic) |
-| Xác thực | Có | Chưa có |
-| TLS/SSL | Có | Chưa có |
+| Xác thực | Có | Có (token) |
+| TLS/SSL | Có | Có (tùy chọn) |
 
 ---
 
