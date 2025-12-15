@@ -154,6 +154,7 @@ func main() {
 		clientID   = flag.String("id", "", "Client ID (required)")
 		command    = flag.String("cmd", "", "Command to execute (optional, if not provided, enters interactive mode)")
 		token      = flag.String("token", "", "Auth token (required if server enforces auth)")
+		allowUnsafe = flag.Bool("allow-unsafe", false, "Allow running without token (only if server allows)")
 	)
 	flag.Parse()
 
@@ -161,6 +162,10 @@ func main() {
 		// Generate a unique client ID
 		*clientID = fmt.Sprintf("client-%d", time.Now().UnixNano())
 		fmt.Printf("Generated client ID: %s\n", *clientID)
+	}
+
+	if *token == "" && !*allowUnsafe {
+		log.Println("Warning: token is empty; server may reject requests. Use --allow-unsafe to bypass this warning.")
 	}
 
 	// Connect to server

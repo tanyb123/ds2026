@@ -77,6 +77,9 @@ type RemoteShellService struct {
 	rateLimit     int
 	rateWindow    time.Duration
 	rateCounters  map[string]*rateInfo
+	maxRuntime    time.Duration
+	maxOutput     int
+	blockChaining bool
 }
 
 type rateInfo struct {
@@ -94,7 +97,7 @@ type Session struct {
 }
 
 // NewRemoteShellService creates a new remote shell service
-func NewRemoteShellService(authToken string, allowedCmds map[string]struct{}, rateLimit int, rateWindow time.Duration) *RemoteShellService {
+func NewRemoteShellService(authToken string, allowedCmds map[string]struct{}, rateLimit int, rateWindow time.Duration, maxRuntime time.Duration, maxOutput int, blockChaining bool) *RemoteShellService {
 	service := &RemoteShellService{
 		sessions:       make(map[string]*Session),
 		sessionTimeout: 30 * time.Minute, // 30 minutes timeout
@@ -104,6 +107,9 @@ func NewRemoteShellService(authToken string, allowedCmds map[string]struct{}, ra
 		rateLimit:      rateLimit,
 		rateWindow:     rateWindow,
 		rateCounters:   make(map[string]*rateInfo),
+		maxRuntime:     maxRuntime,
+		maxOutput:      maxOutput,
+		blockChaining:  blockChaining,
 	}
 	// Start background cleanup goroutine
 	go service.cleanupInactiveSessions()
@@ -199,6 +205,12 @@ func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) 
 		return nil
 	}
 
+	if r.blockChaining && containsChaining(req.Command) {
+		resp.Error = "chaining/piping is blocked"
+		resp.ExitCode = -1
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -218,7 +230,11 @@ func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) 
 	}
 
 	// Prepare command with timeout context
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	limit := r.maxRuntime
+	if limit <= 0 {
+		limit = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -241,6 +257,9 @@ func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) 
 
 	// Execute command
 	output, err := cmd.CombinedOutput()
+	if r.maxOutput > 0 && len(output) > r.maxOutput {
+		output = output[:r.maxOutput]
+	}
 	
 	// Check for timeout
 	if ctx.Err() == context.DeadlineExceeded {
@@ -487,6 +506,18 @@ func keys(m map[string]struct{}) []string {
 	return out
 }
 
+// containsChaining blocks common shell chaining tokens
+func containsChaining(cmd string) bool {
+	l := strings.ToLower(cmd)
+	bad := []string{"|", "&&", "||", ";"}
+	for _, b := range bad {
+		if strings.Contains(l, b) {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	var (
 		port          = flag.Int("port", 8080, "Port to listen on")
@@ -510,7 +541,8 @@ func main() {
 		}
 	}
 
-	service := NewRemoteShellService(*authToken, allowed, *rateLimit, time.Duration(*rateWindowSec)*time.Second)
+	limit := time.Duration(*rateWindowSec) * time.Second
+	service := NewRemoteShellService(*authToken, allowed, *rateLimit, time.Duration(*rateWindowSec)*time.Second, limit, 256*1024, true)
 	rpc.Register(service)
 
 	addr := fmt.Sprintf(":%d", *port)
@@ -539,6 +571,7 @@ func main() {
 		log.Printf("Command whitelist enabled: %v", keys(allowed))
 	}
 	log.Printf("Rate limit: %d requests / %ds per client", *rateLimit, *rateWindowSec)
+	log.Printf("Max runtime: %ds, Max output: %d bytes, Block chaining: %v", int(service.maxRuntime.Seconds()), service.maxOutput, service.blockChaining)
 	
 	// Display local IP addresses
 	addrs, err := net.InterfaceAddrs()
