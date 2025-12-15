@@ -362,23 +362,24 @@ go run "$goroot\src\crypto\tls\generate_cert.go" -host "localhost"
 Nếu server bật TLS nhưng client chưa hỗ trợ TLS dial: chạy server không TLS để client/admin kết nối; (muốn TLS cần sửa client sử dụng tls.Dial).
 
 ### Chạy Admin Tool (quản trị)
-- Liệt kê clients:
-```bash
-./bin/admin -server localhost:8080 -token mytoken
-```
-- Liệt kê sessions chi tiết:
-```bash
-./bin/admin -server localhost:8080 -token mytoken -sessions
-```
-- Kill + ban session theo client ID:
-```bash
-./bin/admin -server localhost:8080 -token mytoken -kill client1
-```
-- Thêm command vào whitelist khi server đang chạy:
-```bash
-./bin/admin -server localhost:8080 -token mytoken -allow-cmds "ls,cat,tail"
-```
-Sau khi kill/ban, client ID đó sẽ bị từ chối ở mọi RPC tiếp theo.
+- **List clients**:
+  ```bash
+  ./bin/admin -server localhost:8080 -token mytoken
+  ```
+- **List sessions chi tiết**:
+  ```bash
+  ./bin/admin -server localhost:8080 -token mytoken -sessions
+  ```
+- **Kill + ban session theo client ID**:
+  ```bash
+  ./bin/admin -server localhost:8080 -token mytoken -kill client1
+  ```
+  Sau khi kill/ban, client ID đó sẽ bị từ chối ở mọi RPC tiếp theo (Execute, Heartbeat, Register,...).
+- **Thêm command vào whitelist khi server đang chạy**:
+  ```bash
+  ./bin/admin -server localhost:8080 -token mytoken -allow-cmds "ls,cat,tail"
+  ```
+  Lệnh này merge thêm `ls`, `cat`, `tail` vào whitelist hiện tại (lấy theo từ đầu tiên của command).
 
 ---
 
