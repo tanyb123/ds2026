@@ -48,28 +48,26 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 ### Kiến trúc thành phần
 
 #### 1. **RPC Server** (`server/main.go`)
-- **Chức năng**: Xử lý các RPC calls từ clients
-- **Tính năng**:
-  - Lắng nghe trên port 8080
-  - Xử lý nhiều connections đồng thời (goroutine per connection)
-  - Quản lý sessions cho mỗi client
-  - Thực thi lệnh shell với timeout protection
-  - Tự động cleanup sessions không hoạt động
+- Goroutine per connection, quản lý session
+- Timeout lệnh, giới hạn runtime và kích thước output
+- Whitelist lệnh, chặn chaining/piping (`|`, `&&`, `||`, `;`)
+- Rate limit theo client, session timeout + cleanup
+- Auth token cho tất cả RPC (tùy chọn), TLS tùy chọn
 
 #### 2. **RPC Client** (`client/main.go`)
-- **Chức năng**: Kết nối đến server và thực thi lệnh
-- **Tính năng**:
-  - Interactive mode (shell tương tác)
-  - Non-interactive mode (thực thi một lệnh và thoát)
-  - Tự động reconnect khi mất kết nối
-  - Heartbeat mechanism để giữ session alive
-  - Quản lý environment variables và working directory
+- Interactive / one-shot command
+- Tự động reconnect, heartbeat keepalive
+- Gửi auth token, set env, change dir
 
 #### 3. **Admin Tool** (`admin/main.go`)
-- **Chức năng**: Quản lý và giám sát hệ thống
-- **Tính năng**:
-  - Liệt kê tất cả clients đang active
-  - Xem thông tin sessions
+- Liệt kê clients đang active (có thể kèm token)
+
+### Bảo mật & kiểm soát
+- Auth token cho mọi RPC (bật qua `--auth-token`)
+- TLS tùy chọn (`--tls-cert`, `--tls-key`)
+- Whitelist lệnh; chặn chaining/piping
+- Rate limit per client; session timeout + cleanup
+- Giới hạn runtime lệnh và kích thước output
 
 ### Entity Relationship Model (ERM)
 
@@ -182,30 +180,15 @@ defer r.mu.Unlock()
 ```
 
 ### 2. **Fault Tolerance (Chịu lỗi)**
-- **Dọn dẹp Session**: Tự động xóa sessions không hoạt động (30 phút timeout)
-- **Logic kết nối lại**: Client tự động reconnect khi mất kết nối
-- **Cơ chế Heartbeat**: Keepalive để phát hiện dead connections
-- **Timeout lệnh**: Timeout 5 phút cho mỗi lệnh để tránh hang
-- **Khôi phục lỗi**: Retry mechanism khi connection bị mất
+- Dọn dẹp session không hoạt động (timeout)
+- Client reconnect + heartbeat
+- Timeout lệnh, giới hạn runtime/output
+- Rate limit để giảm overload
 
-**Implementation**:
-```go
-// Cleanup inactive sessions mỗi 5 phút
-func (r *RemoteShellService) cleanupInactiveSessions() {
-    ticker := time.NewTicker(5 * time.Minute)
-    // Remove sessions inactive > 30 minutes
-}
-
-// Command timeout protection
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-defer cancel()
-```
-
-### 3. **Transparency (Trong suốt)**
-- **Trong suốt truy cập**: Clients truy cập remote shell như local shell
-- **Trong suốt vị trí**: Clients không cần biết vị trí vật lý của server
-- **Trong suốt đồng thời**: Nhiều clients hoạt động đồng thời mà không ảnh hưởng lẫn nhau
-- **Trong suốt lỗi**: Hệ thống tự động xử lý lỗi và recovery
+### 3. **Security & Access Control**
+- Auth token (tùy chọn), TLS (tùy chọn)
+- Whitelist lệnh, chặn chaining/piping
+- Session isolation (workdir, env riêng)
 
 ### 4. **Resource Sharing (Chia sẻ tài nguyên)**
 - **Server chia sẻ**: Nhiều clients chia sẻ một RPC server
@@ -215,9 +198,9 @@ defer cancel()
   - Command execution context riêng
 
 ### 5. **Scalability (Khả năng mở rộng)**
-- **Sẵn sàng mở rộng ngang**: Architecture hỗ trợ mở rộng (có thể thêm load balancer)
-- **RPC Calls không trạng thái**: Mỗi RPC call độc lập, dễ scale
-- **Sử dụng tài nguyên hiệu quả**: Goroutines nhẹ, có thể handle nhiều clients
+- Sẵn sàng mở rộng ngang (có thể đặt sau load balancer)
+- RPC không trạng thái (dễ scale)
+- Goroutines nhẹ, handle nhiều clients
 
 ### 6. **Communication (Giao tiếp)**
 - **Giao thức RPC**: Sử dụng Go's `net/rpc` cho remote procedure calls
