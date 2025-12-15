@@ -7,8 +7,13 @@ import (
 	"net/rpc"
 )
 
+type ListRequest struct {
+	Token string
+}
+
 func main() {
 	var serverAddr = flag.String("server", "localhost:8080", "RPC server address")
+	var token = flag.String("token", "", "Auth token (if server requires)")
 	flag.Parse()
 
 	// Connect to server
@@ -20,7 +25,8 @@ func main() {
 
 	// List active clients
 	var clients []string
-	err = client.Call("RemoteShellService.ListClients", "", &clients)
+	req := ListRequest{Token: *token}
+	err = client.Call("RemoteShellService.ListClients", req, &clients)
 	if err != nil {
 		log.Fatal("Error listing clients:", err)
 	}

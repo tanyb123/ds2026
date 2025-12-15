@@ -16,6 +16,7 @@ type CommandRequest struct {
 	Command string
 	Args    []string
 	ID      string
+	Token   string
 }
 
 type CommandResponse struct {
@@ -25,14 +26,38 @@ type CommandResponse struct {
 	ID       string
 }
 
+type HeartbeatRequest struct {
+	ID    string
+	Token string
+}
+
+type RegisterRequest struct {
+	ID    string
+	Token string
+}
+
+type EnvRequest struct {
+	ID    string
+	Token string
+	Key   string
+	Value string
+}
+
+type DirRequest struct {
+	ID    string
+	Token string
+	Dir   string
+}
+
 type RemoteShellClient struct {
 	client     *rpc.Client
 	id         string
 	serverAddr string
 	connected  bool
+	token      string
 }
 
-func NewRemoteShellClient(serverAddr string, clientID string) (*RemoteShellClient, error) {
+func NewRemoteShellClient(serverAddr string, clientID string, token string) (*RemoteShellClient, error) {
 	client, err := rpc.Dial("tcp", serverAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %v", err)
@@ -43,6 +68,7 @@ func NewRemoteShellClient(serverAddr string, clientID string) (*RemoteShellClien
 		id:         clientID,
 		serverAddr: serverAddr,
 		connected:  true,
+		token:      token,
 	}, nil
 }
 
@@ -66,7 +92,8 @@ func (c *RemoteShellClient) Reconnect() error {
 // SendHeartbeat sends a heartbeat to keep the session alive
 func (c *RemoteShellClient) SendHeartbeat() error {
 	var resp string
-	err := c.client.Call("RemoteShellService.Heartbeat", c.id, &resp)
+	req := HeartbeatRequest{ID: c.id, Token: c.token}
+	err := c.client.Call("RemoteShellService.Heartbeat", req, &resp)
 	if err != nil {
 		c.connected = false
 		return err
@@ -78,6 +105,7 @@ func (c *RemoteShellClient) Execute(command string) (*CommandResponse, error) {
 	req := CommandRequest{
 		Command: command,
 		ID:      c.id,
+		Token:   c.token,
 	}
 	var resp CommandResponse
 
@@ -99,27 +127,21 @@ func (c *RemoteShellClient) Execute(command string) (*CommandResponse, error) {
 }
 
 func (c *RemoteShellClient) SetEnv(key, value string) error {
-	req := map[string]string{
-		"client_id": c.id,
-		"key":       key,
-		"value":     value,
-	}
+	req := EnvRequest{ID: c.id, Token: c.token, Key: key, Value: value}
 	var resp string
 	return c.client.Call("RemoteShellService.SetEnv", req, &resp)
 }
 
 func (c *RemoteShellClient) ChangeDir(dir string) error {
-	req := map[string]string{
-		"client_id": c.id,
-		"dir":       dir,
-	}
+	req := DirRequest{ID: c.id, Token: c.token, Dir: dir}
 	var resp string
 	return c.client.Call("RemoteShellService.ChangeDir", req, &resp)
 }
 
 func (c *RemoteShellClient) Register() error {
 	var resp string
-	return c.client.Call("RemoteShellService.Register", c.id, &resp)
+	req := RegisterRequest{ID: c.id, Token: c.token}
+	return c.client.Call("RemoteShellService.Register", req, &resp)
 }
 
 func (c *RemoteShellClient) Close() error {
@@ -131,6 +153,7 @@ func main() {
 		serverAddr = flag.String("server", "localhost:8080", "RPC server address")
 		clientID   = flag.String("id", "", "Client ID (required)")
 		command    = flag.String("cmd", "", "Command to execute (optional, if not provided, enters interactive mode)")
+		token      = flag.String("token", "", "Auth token (required if server enforces auth)")
 	)
 	flag.Parse()
 
@@ -141,7 +164,7 @@ func main() {
 	}
 
 	// Connect to server
-	shellClient, err := NewRemoteShellClient(*serverAddr, *clientID)
+	shellClient, err := NewRemoteShellClient(*serverAddr, *clientID, *token)
 	if err != nil {
 		log.Fatal("Failed to connect:", err)
 	}

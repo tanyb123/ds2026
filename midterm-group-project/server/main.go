@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +21,7 @@ type CommandRequest struct {
 	Command string
 	Args    []string
 	ID      string // Client ID for tracking
+	Token   string // Auth token
 }
 
 // CommandResponse represents the result of command execution
@@ -28,12 +32,56 @@ type CommandResponse struct {
 	ID       string
 }
 
+// HeartbeatRequest for keepalive
+type HeartbeatRequest struct {
+	ID    string
+	Token string
+}
+
+// RegisterRequest for registering client
+type RegisterRequest struct {
+	ID    string
+	Token string
+}
+
+// EnvRequest for set env
+type EnvRequest struct {
+	ID    string
+	Token string
+	Key   string
+	Value string
+}
+
+// DirRequest for change directory
+type DirRequest struct {
+	ID    string
+	Token string
+	Dir   string
+}
+
+// ListRequest for listing clients
+type ListRequest struct {
+	Token string
+}
+
 // RemoteShellService is the RPC service for remote shell execution
 type RemoteShellService struct {
-	mu            sync.RWMutex
-	sessions      map[string]*Session // Track active sessions by client ID
-	sessionTimeout time.Duration      // Timeout for inactive sessions
-	stopCleanup   chan bool           // Channel to stop cleanup goroutine
+	mu             sync.RWMutex
+	sessions       map[string]*Session // Track active sessions by client ID
+	sessionTimeout time.Duration       // Timeout for inactive sessions
+	stopCleanup    chan bool           // Channel to stop cleanup goroutine
+
+	// Security / limits
+	authToken     string
+	allowedCmds   map[string]struct{}
+	rateLimit     int
+	rateWindow    time.Duration
+	rateCounters  map[string]*rateInfo
+}
+
+type rateInfo struct {
+	count      int
+	windowFrom time.Time
 }
 
 // Session tracks a client session
@@ -46,11 +94,16 @@ type Session struct {
 }
 
 // NewRemoteShellService creates a new remote shell service
-func NewRemoteShellService() *RemoteShellService {
+func NewRemoteShellService(authToken string, allowedCmds map[string]struct{}, rateLimit int, rateWindow time.Duration) *RemoteShellService {
 	service := &RemoteShellService{
 		sessions:       make(map[string]*Session),
 		sessionTimeout: 30 * time.Minute, // 30 minutes timeout
 		stopCleanup:    make(chan bool),
+		authToken:      authToken,
+		allowedCmds:    allowedCmds,
+		rateLimit:      rateLimit,
+		rateWindow:     rateWindow,
+		rateCounters:   make(map[string]*rateInfo),
 	}
 	// Start background cleanup goroutine
 	go service.cleanupInactiveSessions()
@@ -81,11 +134,16 @@ func (r *RemoteShellService) cleanupInactiveSessions() {
 }
 
 // Heartbeat updates the last active time for a client (for keepalive)
-func (r *RemoteShellService) Heartbeat(clientID string, resp *string) error {
+func (r *RemoteShellService) Heartbeat(req HeartbeatRequest, resp *string) error {
+	if !r.validateToken(req.Token) {
+		*resp = "Error: unauthorized"
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	session, exists := r.sessions[clientID]
+	session, exists := r.sessions[req.ID]
 	if !exists {
 		*resp = "Error: client not registered"
 		return nil
@@ -98,6 +156,7 @@ func (r *RemoteShellService) Heartbeat(clientID string, resp *string) error {
 
 // GetSessionInfo returns information about a client session
 func (r *RemoteShellService) GetSessionInfo(clientID string, resp *map[string]interface{}) error {
+	// Kept without token for backward compatibility; can be secured similarly if needed
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -122,6 +181,24 @@ func (r *RemoteShellService) GetSessionInfo(clientID string, resp *map[string]in
 
 // Execute executes a shell command remotely
 func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) error {
+	if !r.validateToken(req.Token) {
+		resp.Error = "unauthorized"
+		resp.ExitCode = -1
+		return nil
+	}
+
+	if !r.allowCommand(req.Command) {
+		resp.Error = "command not allowed"
+		resp.ExitCode = -1
+		return nil
+	}
+
+	if !r.consumeRate(req.ID) {
+		resp.Error = "rate limit exceeded"
+		resp.ExitCode = -1
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -200,38 +277,58 @@ func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) 
 }
 
 // Register registers a new client session
-func (r *RemoteShellService) Register(clientID string, resp *string) error {
+func (r *RemoteShellService) Register(req RegisterRequest, resp *string) error {
+	if !r.validateToken(req.Token) {
+		*resp = "Error: unauthorized"
+		return nil
+	}
+
+	if !r.consumeRate(req.ID) {
+		*resp = "Error: rate limit exceeded"
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	now := time.Now()
-	session, exists := r.sessions[clientID]
+	session, exists := r.sessions[req.ID]
 	if !exists {
 		session = &Session{
-			ID:          clientID,
+			ID:          req.ID,
 			Env:         make(map[string]string),
 			WorkDir:     getDefaultWorkDir(),
 			ConnectedAt: now,
 			LastActive:  now,
 		}
-		r.sessions[clientID] = session
-		log.Printf("[Client %s] Registered (new session)", clientID)
-		*resp = fmt.Sprintf("Client %s registered successfully", clientID)
+		r.sessions[req.ID] = session
+		log.Printf("[Client %s] Registered (new session)", req.ID)
+		*resp = fmt.Sprintf("Client %s registered successfully", req.ID)
 	} else {
 		session.LastActive = now
-		log.Printf("[Client %s] Re-registered (existing session)", clientID)
-		*resp = fmt.Sprintf("Client %s re-registered", clientID)
+		log.Printf("[Client %s] Re-registered (existing session)", req.ID)
+		*resp = fmt.Sprintf("Client %s re-registered", req.ID)
 	}
 
 	return nil
 }
 
 // SetEnv sets an environment variable for a client session
-func (r *RemoteShellService) SetEnv(req map[string]string, resp *string) error {
+func (r *RemoteShellService) SetEnv(req EnvRequest, resp *string) error {
+	if !r.validateToken(req.Token) {
+		*resp = "Error: unauthorized"
+		return nil
+	}
+
+	if !r.consumeRate(req.ID) {
+		*resp = "Error: rate limit exceeded"
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	clientID := req["client_id"]
+	clientID := req.ID
 	if clientID == "" {
 		*resp = "Error: client_id required"
 		return nil
@@ -252,8 +349,8 @@ func (r *RemoteShellService) SetEnv(req map[string]string, resp *string) error {
 	}
 	session.LastActive = time.Now()
 
-	key := req["key"]
-	value := req["value"]
+	key := req.Key
+	value := req.Value
 	if key != "" && value != "" {
 		session.Env[key] = value
 		*resp = fmt.Sprintf("Set %s=%s for client %s", key, value, clientID)
@@ -265,12 +362,22 @@ func (r *RemoteShellService) SetEnv(req map[string]string, resp *string) error {
 }
 
 // ChangeDir changes the working directory for a client session
-func (r *RemoteShellService) ChangeDir(req map[string]string, resp *string) error {
+func (r *RemoteShellService) ChangeDir(req DirRequest, resp *string) error {
+	if !r.validateToken(req.Token) {
+		*resp = "Error: unauthorized"
+		return nil
+	}
+
+	if !r.consumeRate(req.ID) {
+		*resp = "Error: rate limit exceeded"
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	clientID := req["client_id"]
-	dir := req["dir"]
+	clientID := req.ID
+	dir := req.Dir
 
 	if clientID == "" {
 		*resp = "Error: client_id required"
@@ -307,7 +414,11 @@ func (r *RemoteShellService) ChangeDir(req map[string]string, resp *string) erro
 }
 
 // ListClients returns list of active client sessions
-func (r *RemoteShellService) ListClients(req string, resp *[]string) error {
+func (r *RemoteShellService) ListClients(req ListRequest, resp *[]string) error {
+	if !r.validateToken(req.Token) {
+		return fmt.Errorf("unauthorized")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -328,21 +439,106 @@ func getDefaultWorkDir() string {
 	return wd
 }
 
+// validateToken checks auth token if configured
+func (r *RemoteShellService) validateToken(token string) bool {
+	if r.authToken == "" {
+		return true // no auth configured
+	}
+	return token == r.authToken
+}
+
+// allowCommand checks whitelist; if empty allow all
+func (r *RemoteShellService) allowCommand(cmd string) bool {
+	if len(r.allowedCmds) == 0 {
+		return true
+	}
+	trimmed := strings.TrimSpace(cmd)
+	if trimmed == "" {
+		return false
+	}
+	first := strings.Fields(trimmed)[0]
+	_, ok := r.allowedCmds[first]
+	return ok
+}
+
+// consumeRate applies simple fixed window rate limiting per client ID
+func (r *RemoteShellService) consumeRate(id string) bool {
+	if r.rateLimit <= 0 {
+		return true
+	}
+	now := time.Now()
+	info, ok := r.rateCounters[id]
+	if !ok || now.Sub(info.windowFrom) > r.rateWindow {
+		r.rateCounters[id] = &rateInfo{count: 1, windowFrom: now}
+		return true
+	}
+	if info.count >= r.rateLimit {
+		return false
+	}
+	info.count++
+	return true
+}
+
+func keys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func main() {
-	// Create and register RPC service
-	service := NewRemoteShellService()
+	var (
+		port          = flag.Int("port", 8080, "Port to listen on")
+		authToken     = flag.String("auth-token", "", "Auth token required from clients (optional)")
+		allowCmdsStr  = flag.String("allow-commands", "", "Comma-separated whitelist of allowed commands (empty = allow all)")
+		rateLimit     = flag.Int("rate-limit", 60, "Max requests per window per client (0 = disable)")
+		rateWindowSec = flag.Int("rate-window-sec", 60, "Rate limit window in seconds")
+		tlsCert       = flag.String("tls-cert", "", "Path to TLS certificate (optional)")
+		tlsKey        = flag.String("tls-key", "", "Path to TLS key (optional)")
+	)
+	flag.Parse()
+
+	allowed := make(map[string]struct{})
+	if strings.TrimSpace(*allowCmdsStr) != "" {
+		parts := strings.Split(*allowCmdsStr, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				allowed[p] = struct{}{}
+			}
+		}
+	}
+
+	service := NewRemoteShellService(*authToken, allowed, *rateLimit, time.Duration(*rateWindowSec)*time.Second)
 	rpc.Register(service)
 
-	// Start RPC server (bind to all interfaces: 0.0.0.0:8080)
-	// This allows connections from both local network and internet
-	listener, err := net.Listen("tcp", ":8080")
+	addr := fmt.Sprintf(":%d", *port)
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal("Error starting server:", err)
 	}
 
+	// Wrap with TLS if cert/key provided
+	if *tlsCert != "" && *tlsKey != "" {
+		cer, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		if err != nil {
+			log.Fatalf("Failed to load TLS cert/key: %v", err)
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cer}}
+		listener = tls.NewListener(listener, config)
+		log.Printf("TLS enabled with cert %s", *tlsCert)
+	}
+
 	// Get server IP addresses for display
-	log.Println("Remote Shell RPC Server started on :8080")
-	log.Println("Server is listening on all network interfaces (0.0.0.0:8080)")
+	log.Printf("Remote Shell RPC Server started on %s", addr)
+	if *authToken != "" {
+		log.Println("Auth token required for all calls")
+	}
+	if len(allowed) > 0 {
+		log.Printf("Command whitelist enabled: %v", keys(allowed))
+	}
+	log.Printf("Rate limit: %d requests / %ds per client", *rateLimit, *rateWindowSec)
 	
 	// Display local IP addresses
 	addrs, err := net.InterfaceAddrs()
@@ -358,7 +554,7 @@ func main() {
 	}
 	
 	log.Println("Waiting for clients...")
-	log.Println("Clients can connect using: <server-ip>:8080")
+	log.Printf("Clients can connect using: <server-ip>:%d", *port)
 
 	// Accept connections
 	for {
