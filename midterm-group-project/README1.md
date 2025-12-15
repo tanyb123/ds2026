@@ -308,7 +308,19 @@ defer r.mu.Unlock()
 
 ### Yêu cầu hệ thống
 - Go 1.21 hoặc cao hơn
-- Windows/Linux/Mac OS
+- Windows / Linux / macOS
+
+#### Cài Go nhanh
+- **Ubuntu/Debian**:
+```bash
+sudo apt update
+sudo apt install golang-go
+go version
+```
+- **Windows/macOS**: tải installer từ `https://go.dev/dl/`, cài đặt rồi kiểm tra:
+```bash
+go version
+```
 
 ### Build dự án
 
