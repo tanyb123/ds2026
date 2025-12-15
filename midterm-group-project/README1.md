@@ -71,6 +71,7 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 - Whitelist lệnh; chặn chaining/piping
 - Rate limit per client; session timeout + cleanup
 - Giới hạn runtime lệnh và kích thước output
+- Admin có thể liệt kê/kết thúc session; kill sẽ “ban” client ID (các RPC sau bị từ chối)
 
 ### Entity Relationship Model (ERM)
 
@@ -321,46 +322,47 @@ defer r.mu.Unlock()
 make build
 ```
 
-### Chạy Server (kèm bảo mật)
-
-Ví dụ bật token + whitelist + rate limit:
-```powershell
-.\bin\server.exe `
-  --auth-token mytoken `
-  --allow-commands "dir,echo" `
-  --rate-limit 60 `
-  --rate-window-sec 60
+### Chạy Server (Windows/Linux/Mac)
+- Bật token + whitelist + rate limit (không TLS):
+```bash
+./bin/server --auth-token mytoken --allow-commands "dir,echo" --rate-limit 60 --rate-window-sec 60
+# Windows PowerShell: .\bin\server.exe --auth-token mytoken --allow-commands "dir,echo" --rate-limit 60 --rate-window-sec 60
 ```
-
-Bật TLS (tùy chọn):
-```powershell
-.\bin\server.exe `
-  --auth-token mytoken `
-  --tls-cert cert.pem `
-  --tls-key key.pem
+- Bật TLS (tùy chọn, sau khi có `cert.pem`, `key.pem`):
+```bash
+./bin/server --auth-token mytoken --tls-cert cert.pem --tls-key key.pem
 ```
+Port mặc định 8080, đổi bằng `--port`.
 
-Port mặc định 8080 (đổi bằng `--port`).
+### Tạo TLS cert self-signed nhanh (Go đã cài sẵn)
+```powershell
+$goroot = go env GOROOT
+go run "$goroot\src\crypto\tls\generate_cert.go" -host "localhost"
+# sinh ra cert.pem, key.pem
+```
+(Hoặc dùng openssl/mkcert nếu đã cài).
 
 ### Chạy Client (có token)
-```powershell
-.\bin\client.exe -server localhost:8080 -id my-client-1 -token mytoken
+```bash
+./bin/client -server localhost:8080 -id client1 -token mytoken
+# Windows: .\bin\client.exe -server localhost:8080 -id client1 -token mytoken
 ```
-Ghi chú: Nếu server bật auth token, client phải truyền `-token` (cảnh báo khi bỏ trống, trừ khi `--allow-unsafe`).
+Nếu server bật TLS nhưng client chưa hỗ trợ TLS dial: chạy server không TLS để client/admin kết nối; (muốn TLS cần sửa client sử dụng tls.Dial).
 
 ### Chạy Admin Tool (quản trị)
 - Liệt kê clients:
-```powershell
-.\bin\admin.exe -server localhost:8080 -token mytoken
+```bash
+./bin/admin -server localhost:8080 -token mytoken
 ```
 - Liệt kê sessions chi tiết:
-```powershell
-.\bin\admin.exe -server localhost:8080 -token mytoken -sessions
+```bash
+./bin/admin -server localhost:8080 -token mytoken -sessions
 ```
-- Kill session theo client ID:
-```powershell
-.\bin\admin.exe -server localhost:8080 -token mytoken -kill client-123
+- Kill + ban session theo client ID:
+```bash
+./bin/admin -server localhost:8080 -token mytoken -kill client1
 ```
+Sau khi kill/ban, client ID đó sẽ bị từ chối ở mọi RPC tiếp theo.
 
 ---
 
