@@ -374,6 +374,10 @@ Nếu server bật TLS nhưng client chưa hỗ trợ TLS dial: chạy server kh
 ```bash
 ./bin/admin -server localhost:8080 -token mytoken -kill client1
 ```
+- Thêm command vào whitelist khi server đang chạy:
+```bash
+./bin/admin -server localhost:8080 -token mytoken -allow-cmds "ls,cat,tail"
+```
 Sau khi kill/ban, client ID đó sẽ bị từ chối ở mọi RPC tiếp theo.
 
 ---

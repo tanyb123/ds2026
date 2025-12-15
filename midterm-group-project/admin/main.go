@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/rpc"
+	"strings"
 )
 
 type ListRequest struct {
@@ -20,11 +21,17 @@ type KillSessionRequest struct {
 	Token string
 }
 
+type UpdateWhitelistRequest struct {
+	Token    string
+	Commands []string
+}
+
 func main() {
 	var serverAddr = flag.String("server", "localhost:8080", "RPC server address")
 	var token = flag.String("token", "", "Auth token (if server requires)")
 	var killID = flag.String("kill", "", "Kill session by client ID")
 	var listSessions = flag.Bool("sessions", false, "List sessions with details")
+	var addCmds = flag.String("allow-cmds", "", "Comma-separated commands to add to server whitelist")
 	flag.Parse()
 
 	// Connect to server
@@ -33,6 +40,28 @@ func main() {
 		log.Fatal("Failed to connect:", err)
 	}
 	defer client.Close()
+
+	// Dynamic whitelist update
+	if *addCmds != "" {
+		parts := strings.Split(*addCmds, ",")
+		cmds := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				cmds = append(cmds, p)
+			}
+		}
+		var resp []string
+		req := UpdateWhitelistRequest{Token: *token, Commands: cmds}
+		if err := client.Call("RemoteShellService.AddToWhitelist", req, &resp); err != nil {
+			log.Fatal("Error updating whitelist:", err)
+		}
+		fmt.Println("Updated whitelist commands:")
+		for _, c := range resp {
+			fmt.Printf("  - %s\n", c)
+		}
+		return
+	}
 
 	if *killID != "" {
 		var resp string

@@ -73,6 +73,12 @@ type KillSessionRequest struct {
 	Token string
 }
 
+// UpdateWhitelistRequest for dynamic whitelist changes
+type UpdateWhitelistRequest struct {
+	Token    string
+	Commands []string
+}
+
 // RemoteShellService is the RPC service for remote shell execution
 type RemoteShellService struct {
 	mu             sync.RWMutex
@@ -524,6 +530,36 @@ func (r *RemoteShellService) KillSession(req KillSessionRequest, resp *string) e
 	r.banned[req.ID] = struct{}{}
 	*resp = "killed and banned"
 	log.Printf("[Admin] Killed and banned session %s", req.ID)
+	return nil
+}
+
+// AddToWhitelist adds commands to the allowed command whitelist
+func (r *RemoteShellService) AddToWhitelist(req UpdateWhitelistRequest, resp *[]string) error {
+	if !r.validateToken(req.Token) {
+		return fmt.Errorf("unauthorized")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.allowedCmds == nil {
+		r.allowedCmds = make(map[string]struct{})
+	}
+
+	for _, c := range req.Commands {
+		trimmed := strings.TrimSpace(c)
+		if trimmed == "" {
+			continue
+		}
+		first := strings.Fields(trimmed)[0]
+		if first == "" {
+			continue
+		}
+		r.allowedCmds[first] = struct{}{}
+		log.Printf("[Admin] Added to whitelist: %s", first)
+	}
+
+	// Return current whitelist for convenience
+	*resp = keys(r.allowedCmds)
 	return nil
 }
 
