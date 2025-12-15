@@ -89,6 +89,7 @@ type RemoteShellService struct {
 	maxRuntime    time.Duration
 	maxOutput     int
 	blockChaining bool
+	banned        map[string]struct{} // Banned client IDs
 }
 
 type rateInfo struct {
@@ -119,6 +120,7 @@ func NewRemoteShellService(authToken string, allowedCmds map[string]struct{}, ra
 		maxRuntime:     maxRuntime,
 		maxOutput:      maxOutput,
 		blockChaining:  blockChaining,
+		banned:         make(map[string]struct{}),
 	}
 	// Start background cleanup goroutine
 	go service.cleanupInactiveSessions()
@@ -152,6 +154,10 @@ func (r *RemoteShellService) cleanupInactiveSessions() {
 func (r *RemoteShellService) Heartbeat(req HeartbeatRequest, resp *string) error {
 	if !r.validateToken(req.Token) {
 		*resp = "Error: unauthorized"
+		return nil
+	}
+	if r.isBanned(req.ID) {
+		*resp = "Error: banned"
 		return nil
 	}
 
@@ -198,6 +204,11 @@ func (r *RemoteShellService) GetSessionInfo(clientID string, resp *map[string]in
 func (r *RemoteShellService) Execute(req CommandRequest, resp *CommandResponse) error {
 	if !r.validateToken(req.Token) {
 		resp.Error = "unauthorized"
+		resp.ExitCode = -1
+		return nil
+	}
+	if r.isBanned(req.ID) {
+		resp.Error = "banned"
 		resp.ExitCode = -1
 		return nil
 	}
@@ -310,6 +321,10 @@ func (r *RemoteShellService) Register(req RegisterRequest, resp *string) error {
 		*resp = "Error: unauthorized"
 		return nil
 	}
+	if r.isBanned(req.ID) {
+		*resp = "Error: banned"
+		return nil
+	}
 
 	if !r.consumeRate(req.ID) {
 		*resp = "Error: rate limit exceeded"
@@ -345,6 +360,10 @@ func (r *RemoteShellService) Register(req RegisterRequest, resp *string) error {
 func (r *RemoteShellService) SetEnv(req EnvRequest, resp *string) error {
 	if !r.validateToken(req.Token) {
 		*resp = "Error: unauthorized"
+		return nil
+	}
+	if r.isBanned(req.ID) {
+		*resp = "Error: banned"
 		return nil
 	}
 
@@ -393,6 +412,10 @@ func (r *RemoteShellService) SetEnv(req EnvRequest, resp *string) error {
 func (r *RemoteShellService) ChangeDir(req DirRequest, resp *string) error {
 	if !r.validateToken(req.Token) {
 		*resp = "Error: unauthorized"
+		return nil
+	}
+	if r.isBanned(req.ID) {
+		*resp = "Error: banned"
 		return nil
 	}
 
@@ -498,8 +521,9 @@ func (r *RemoteShellService) KillSession(req KillSessionRequest, resp *string) e
 		return nil
 	}
 	delete(r.sessions, req.ID)
-	*resp = "killed"
-	log.Printf("[Admin] Killed session %s", req.ID)
+	r.banned[req.ID] = struct{}{}
+	*resp = "killed and banned"
+	log.Printf("[Admin] Killed and banned session %s", req.ID)
 	return nil
 }
 
@@ -557,6 +581,11 @@ func keys(m map[string]struct{}) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func (r *RemoteShellService) isBanned(id string) bool {
+	_, ok := r.banned[id]
+	return ok
 }
 
 // containsChaining blocks common shell chaining tokens
