@@ -377,10 +377,8 @@ func main() {
 			log.Printf("New client connected: %s", clientAddr)
 			defer conn.Close()
 			
-			// Serve RPC with error handling
-			if err := rpc.ServeConn(conn); err != nil {
-				log.Printf("RPC error for client %s: %v", clientAddr, err)
-			}
+			// Serve RPC (net/rpc ServeConn does not return an error)
+			rpc.ServeConn(conn)
 			log.Printf("Client disconnected: %s", clientAddr)
 		}(conn)
 	}
