@@ -99,7 +99,7 @@ graph TB
     C1 -->|RPC Call| TCP
     C2 -->|RPC Call| TCP
     C3 -->|RPC Call| TCP
-    ADMIN -->|List Clients| TCP
+    ADMIN -->|Admin RPCs<br/>(list / sessions / kill / whitelist)| TCP
     
     TCP --> RPC
     RPC --> SERVER
@@ -195,6 +195,9 @@ graph LR
         SETENV[SetEnv]
         CHDIR[ChangeDir]
         LIST[ListClients]
+        LISTSESS[ListSessions]
+        KILL[KillSession]
+        WL[AddToWhitelist]
     end
     
     subgraph "Error Handling"
@@ -212,6 +215,9 @@ graph LR
     SETENV --> MUTEX
     CHDIR --> MUTEX
     LIST --> MUTEX
+    LISTSESS --> MUTEX
+    KILL --> MUTEX
+    WL --> MUTEX
     
     EXEC --> TIMEOUT
     RECONNECT --> RETRY
