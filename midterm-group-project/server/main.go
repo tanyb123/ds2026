@@ -64,6 +64,15 @@ type ListRequest struct {
 	Token string
 }
 
+type ListSessionsRequest struct {
+	Token string
+}
+
+type KillSessionRequest struct {
+	ID    string
+	Token string
+}
+
 // RemoteShellService is the RPC service for remote shell execution
 type RemoteShellService struct {
 	mu             sync.RWMutex
@@ -447,6 +456,50 @@ func (r *RemoteShellService) ListClients(req ListRequest, resp *[]string) error 
 	}
 
 	*resp = clients
+	return nil
+}
+
+// ListSessions returns detail of sessions
+func (r *RemoteShellService) ListSessions(req ListSessionsRequest, resp *[]map[string]interface{}) error {
+	if !r.validateToken(req.Token) {
+		return fmt.Errorf("unauthorized")
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]map[string]interface{}, 0, len(r.sessions))
+	now := time.Now()
+	for id, s := range r.sessions {
+		out = append(out, map[string]interface{}{
+			"id":           id,
+			"work_dir":     s.WorkDir,
+			"env_count":    len(s.Env),
+			"connected_at": s.ConnectedAt.Format(time.RFC3339),
+			"last_active":  s.LastActive.Format(time.RFC3339),
+			"age":          now.Sub(s.ConnectedAt).String(),
+			"idle":         now.Sub(s.LastActive).String(),
+			"is_active":    now.Sub(s.LastActive) < r.sessionTimeout,
+		})
+	}
+	*resp = out
+	return nil
+}
+
+// KillSession removes a session by ID
+func (r *RemoteShellService) KillSession(req KillSessionRequest, resp *string) error {
+	if !r.validateToken(req.Token) {
+		*resp = "unauthorized"
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.sessions[req.ID]; !ok {
+		*resp = "not found"
+		return nil
+	}
+	delete(r.sessions, req.ID)
+	*resp = "killed"
+	log.Printf("[Admin] Killed session %s", req.ID)
 	return nil
 }
 
