@@ -52,6 +52,7 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 - Timeout lệnh, giới hạn runtime và kích thước output
 - Whitelist lệnh, chặn chaining/piping (`|`, `&&`, `||`, `;`)
 - Rate limit theo client, session timeout + cleanup
+- **Giới hạn số lượng connections đồng thời** (chống DDoS)
 - Auth token cho tất cả RPC (tùy chọn), TLS tùy chọn
 
 #### 2. **RPC Client** (`client/main.go`)
@@ -70,8 +71,9 @@ Dự án **Remote Shell RPC System** là một hệ thống phân tán cho phép
 - TLS tùy chọn (`--tls-cert`, `--tls-key`)
 - Whitelist lệnh; chặn chaining/piping
 - Rate limit per client; session timeout + cleanup
+- **Giới hạn số lượng connections đồng thời** (`--max-connections`, mặc định 100)
 - Giới hạn runtime lệnh và kích thước output
-- Admin có thể liệt kê/kết thúc session; kill sẽ “ban” client ID (các RPC sau bị từ chối)
+- Admin có thể liệt kê/kết thúc session; kill sẽ "ban" client ID (các RPC sau bị từ chối)
 
 ### Entity Relationship Model (ERM)
 
@@ -228,15 +230,27 @@ defer r.mu.Unlock()
 - Xử lý command execution với timeout
 - Background goroutine để cleanup inactive sessions
 - Heartbeat mechanism để track client activity
+- **Connection limiting**: Giới hạn số lượng connections đồng thời (chống DDoS)
 
 **Tính năng chính**:
-- `Execute()`: Thực thi shell command
+- `Execute()`: Thực thi shell command (có auth, rate limit, whitelist check)
 - `Register()`: Đăng ký client session
 - `SetEnv()`: Thiết lập environment variable
 - `ChangeDir()`: Thay đổi working directory
 - `ListClients()`: Liệt kê active clients
 - `Heartbeat()`: Keepalive mechanism
 - `GetSessionInfo()`: Lấy thông tin session
+- `ListSessions()`: Liệt kê sessions chi tiết
+- `KillSession()`: Kill và ban session
+- `AddToWhitelist()`: Thêm commands vào whitelist
+
+**Bảo mật**:
+- Auth token validation cho tất cả RPC methods
+- Rate limiting per client (fixed window)
+- Output size limit (256KB default)
+- Command whitelist
+- Block chaining/piping
+- **Connection limiting với semaphore**
 
 ### Client Components
 
@@ -335,16 +349,17 @@ make build
 ```
 
 ### Chạy Server (Windows/Linux/Mac)
-- Bật token + whitelist + rate limit (không TLS):
+- Bật token + whitelist + rate limit + connection limit (không TLS):
 ```bash
-./bin/server --auth-token mytoken --allow-commands "dir,echo" --rate-limit 60 --rate-window-sec 60
-# Windows PowerShell: .\bin\server.exe --auth-token mytoken --allow-commands "dir,echo" --rate-limit 60 --rate-window-sec 60
+./bin/server --auth-token mytoken --allow-commands "dir,echo" --rate-limit 60 --rate-window-sec 60 --max-connections 100
+# Windows PowerShell: .\bin\server.exe --auth-token mytoken --allow-commands "dir,echo" --rate-limit 60 --rate-window-sec 60 --max-connections 100
 ```
 - Bật TLS (tùy chọn, sau khi có `cert.pem`, `key.pem`):
 ```bash
-./bin/server --auth-token mytoken --tls-cert cert.pem --tls-key key.pem
+./bin/server --auth-token mytoken --tls-cert cert.pem --tls-key key.pem --max-connections 50
 ```
-Port mặc định 8080, đổi bằng `--port`.
+- **Connection limiting**: `--max-connections` giới hạn số connections đồng thời (mặc định 100, 0 = unlimited)
+- Port mặc định 8080, đổi bằng `--port`.
 
 ### Tạo TLS cert self-signed nhanh (Go đã cài sẵn)
 ```powershell

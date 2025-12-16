@@ -638,13 +638,14 @@ func containsChaining(cmd string) bool {
 
 func main() {
 	var (
-		port          = flag.Int("port", 8080, "Port to listen on")
-		authToken     = flag.String("auth-token", "", "Auth token required from clients (optional)")
-		allowCmdsStr  = flag.String("allow-commands", "", "Comma-separated whitelist of allowed commands (empty = allow all)")
-		rateLimit     = flag.Int("rate-limit", 60, "Max requests per window per client (0 = disable)")
-		rateWindowSec = flag.Int("rate-window-sec", 60, "Rate limit window in seconds")
-		tlsCert       = flag.String("tls-cert", "", "Path to TLS certificate (optional)")
-		tlsKey        = flag.String("tls-key", "", "Path to TLS key (optional)")
+		port           = flag.Int("port", 8080, "Port to listen on")
+		authToken      = flag.String("auth-token", "", "Auth token required from clients (optional)")
+		allowCmdsStr   = flag.String("allow-commands", "", "Comma-separated whitelist of allowed commands (empty = allow all)")
+		rateLimit      = flag.Int("rate-limit", 60, "Max requests per window per client (0 = disable)")
+		rateWindowSec  = flag.Int("rate-window-sec", 60, "Rate limit window in seconds")
+		maxConnections = flag.Int("max-connections", 100, "Maximum number of concurrent connections (0 = unlimited)")
+		tlsCert        = flag.String("tls-cert", "", "Path to TLS certificate (optional)")
+		tlsKey         = flag.String("tls-key", "", "Path to TLS key (optional)")
 	)
 	flag.Parse()
 
@@ -690,6 +691,11 @@ func main() {
 	}
 	log.Printf("Rate limit: %d requests / %ds per client", *rateLimit, *rateWindowSec)
 	log.Printf("Max runtime: %ds, Max output: %d bytes, Block chaining: %v", int(service.maxRuntime.Seconds()), service.maxOutput, service.blockChaining)
+	if *maxConnections > 0 {
+		log.Printf("Max concurrent connections: %d", *maxConnections)
+	} else {
+		log.Println("Max concurrent connections: unlimited")
+	}
 	
 	// Display local IP addresses
 	addrs, err := net.InterfaceAddrs()
@@ -707,12 +713,31 @@ func main() {
 	log.Println("Waiting for clients...")
 	log.Printf("Clients can connect using: <server-ip>:%d", *port)
 
+	// Connection limiting semaphore
+	var connectionSemaphore chan struct{}
+	if *maxConnections > 0 {
+		connectionSemaphore = make(chan struct{}, *maxConnections)
+	}
+
 	// Accept connections
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Printf("Error accepting connection: %v", err)
 			continue
+		}
+
+		// Check connection limit
+		if *maxConnections > 0 {
+			select {
+			case connectionSemaphore <- struct{}{}:
+				// Acquired semaphore, proceed with connection
+			default:
+				// Max connections reached, reject
+				conn.Close()
+				log.Printf("Max connections (%d) reached, rejecting connection from %s", *maxConnections, conn.RemoteAddr())
+				continue
+			}
 		}
 
 		// Set connection timeout
@@ -722,6 +747,11 @@ func main() {
 		go func(conn net.Conn) {
 			clientAddr := conn.RemoteAddr()
 			log.Printf("New client connected: %s", clientAddr)
+			
+			// Release semaphore when connection closes
+			if *maxConnections > 0 {
+				defer func() { <-connectionSemaphore }()
+			}
 			defer conn.Close()
 			
 			// Serve RPC (net/rpc ServeConn does not return an error)
